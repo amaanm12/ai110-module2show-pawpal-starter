@@ -168,4 +168,5 @@ Core scheduling logic — priority ordering, time assignment, recurrence, and co
 One star is held back because edge cases (zero available minutes, task duration exceeding total budget, weekly recurrence spanning month boundaries) are not yet tested.
 
 ###Image
+
 ![alt text](Project 2 codepath SS.png)
