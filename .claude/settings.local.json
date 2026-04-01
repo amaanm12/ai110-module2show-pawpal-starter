@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python main.py)",
+      "Bash(python3 main.py)",
+      "Bash(py main.py)",
+      "Bash(py -m pytest tests/test_pawpal.py -v)"
+    ]
+  }
+}
