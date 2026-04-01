@@ -3,169 +3,259 @@ app.py
 PawPal+ Streamlit UI — wired to the logic layer in pawpal_system.py.
 """
 
-# Step 1: Import classes from the logic layer
 import streamlit as st
 from pawpal_system import Owner, Pet, Task, Scheduler
 
-st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
-st.title("🐾 PawPal+")
+st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="wide")
 
-# ------------------------------------------------------------------
-# Step 2: Manage application "memory" with st.session_state
-#
-# Streamlit reruns the whole script on every interaction.
-# We store the Owner object in session_state so it survives reruns.
-# The "owner" key is checked first — if it already exists we reuse it;
-# otherwise we create a fresh Owner with sensible defaults.
-# ------------------------------------------------------------------
+# Sidebar — owner settings
+with st.sidebar:
+    st.title("🐾 PawPal+")
+    st.caption("Pet care planning assistant")
+    st.divider()
 
-if "owner" not in st.session_state:
-    st.session_state.owner = Owner(name="Jordan", available_minutes=120)
+    st.subheader("Owner Settings")
 
-# Convenience alias so the rest of the code is readable
-owner: Owner = st.session_state.owner
+    if "owner" not in st.session_state:
+        st.session_state.owner = Owner(name="Jordan", available_minutes=120)
 
-# ------------------------------------------------------------------
-# Section: Owner setup
-# ------------------------------------------------------------------
-st.header("Owner Settings")
+    owner: Owner = st.session_state.owner
 
-col_name, col_time = st.columns(2)
-with col_name:
-    new_name = st.text_input("Owner name", value=owner.name)
-with col_time:
+    new_name = st.text_input("Your name", value=owner.name)
     new_mins = st.number_input(
-        "Available minutes today", min_value=10, max_value=480, value=owner.available_minutes, step=10
+        "Available minutes today",
+        min_value=10, max_value=480,
+        value=owner.available_minutes,
+        step=10,
     )
 
-if st.button("Update owner"):
-    owner.name = new_name
-    owner.available_minutes = new_mins
-    st.success(f"Owner updated: {owner.name} ({owner.available_minutes} min available)")
+    if st.button("Save settings", use_container_width=True):
+        owner.name = new_name
+        owner.available_minutes = int(new_mins)
+        st.success("Settings saved.")
 
-st.divider()
+    st.divider()
+    st.caption(f"Pets registered: **{len(owner.pets)}**")
+    st.caption(f"Total tasks: **{len(owner.get_all_tasks())}**")
+    st.caption(f"Pending tasks: **{len(owner.get_all_pending_tasks())}**")
 
-# ------------------------------------------------------------------
-# Section: Add a Pet
-# Step 3 (Pet): form submission calls pet.add_pet() on the owner object
-# stored in session_state, so the pet persists across reruns.
-# ------------------------------------------------------------------
-st.header("Add a Pet")
+# ===================================================================
+# Main area — three tabs
+# ===================================================================
+tab_pets, tab_tasks, tab_schedule = st.tabs(["Pets", "Tasks", "Today's Schedule"])
 
-col_pet, col_species, col_age = st.columns(3)
-with col_pet:
-    pet_name = st.text_input("Pet name", value="Mochi")
-with col_species:
-    species = st.selectbox("Species", ["dog", "cat", "rabbit", "other"])
-with col_age:
-    age = st.number_input("Age (years)", min_value=0, max_value=30, value=2)
+# -------------------------------------------------------------------
+# TAB 1 — Pets
+# -------------------------------------------------------------------
+with tab_pets:
+    st.header("Your Pets")
 
-notes = st.text_input("Care notes (optional)", value="")
+    with st.form("add_pet_form", clear_on_submit=True):
+        st.subheader("Add a new pet")
+        col_name, col_species, col_age = st.columns(3)
+        with col_name:
+            pet_name = st.text_input("Pet name", placeholder="e.g. Mochi")
+        with col_species:
+            species = st.selectbox("Species", ["dog", "cat", "rabbit", "bird", "other"])
+        with col_age:
+            age = st.number_input("Age (years)", min_value=0, max_value=30, value=2)
+        notes = st.text_input("Care notes (optional)", placeholder="e.g. grain-free diet, indoor only")
+        submitted = st.form_submit_button("Add pet", use_container_width=True)
 
-if st.button("Add pet"):
-    # Guard: don't allow duplicate pet names
-    if owner.get_pet(pet_name):
-        st.warning(f"A pet named '{pet_name}' already exists.")
+    if submitted:
+        if not pet_name.strip():
+            st.warning("Please enter a pet name.")
+        elif owner.get_pet(pet_name.strip()):
+            st.warning(f"A pet named **{pet_name}** already exists.")
+        else:
+            owner.add_pet(Pet(name=pet_name.strip(), species=species, age=int(age), notes=notes))
+            st.success(f"Added **{pet_name}** the {species}!")
+
+    st.divider()
+
+    if not owner.pets:
+        st.info("No pets yet — add one above to get started.")
     else:
-        new_pet = Pet(name=pet_name, species=species, age=int(age), notes=notes)
-        owner.add_pet(new_pet)          # <-- calls Owner.add_pet() from pawpal_system.py
-        st.success(f"Added {new_pet.name} the {species}!")
+        cols = st.columns(min(len(owner.pets), 3))
+        for i, pet in enumerate(owner.pets):
+            with cols[i % 3]:
+                pending = len(pet.get_pending_tasks())
+                done    = len(pet.get_completed_tasks())
+                st.metric(label=f"{pet.name} ({pet.species})", value=f"{pending} pending", delta=f"{done} done")
+                if pet.notes:
+                    st.caption(f"Notes: {pet.notes}")
 
-# Show current pets
-if owner.pets:
-    st.markdown("**Current pets:**")
-    for pet in owner.pets:
-        note_text = f" — {pet.notes}" if pet.notes else ""
-        st.write(f"- **{pet.name}** ({pet.species}, age {pet.age}){note_text}")
-else:
-    st.info("No pets yet. Add one above.")
+# -------------------------------------------------------------------
+# TAB 2 — Tasks
+# -------------------------------------------------------------------
+with tab_tasks:
+    st.header("Manage Tasks")
 
-st.divider()
+    if not owner.pets:
+        st.info("Add at least one pet in the **Pets** tab before adding tasks.")
+    else:
+        with st.form("add_task_form", clear_on_submit=True):
+            st.subheader("Add a new task")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                target_pet = st.selectbox("Assign to", [p.name for p in owner.pets])
+            with col2:
+                task_title = st.text_input("Task title", placeholder="e.g. Morning walk")
+            with col3:
+                priority = st.selectbox("Priority", ["low", "medium", "high"], index=2)
 
-# ------------------------------------------------------------------
-# Section: Add a Task to a Pet
-# Step 3 (Task): form submission calls pet.add_task() so the Task
-# object lives inside the Pet, which lives inside the Owner in session_state.
-# ------------------------------------------------------------------
-st.header("Add a Task")
+            col4, col5, col6 = st.columns(3)
+            with col4:
+                duration = st.number_input("Duration (min)", min_value=1, max_value=240, value=20)
+            with col5:
+                frequency = st.selectbox("Frequency", ["daily", "weekly", "as-needed"])
+            with col6:
+                category = st.selectbox(
+                    "Category",
+                    ["general", "feeding", "walk", "grooming", "medication", "enrichment", "hygiene"],
+                )
+            description = st.text_input("Description (optional)")
+            task_submitted = st.form_submit_button("Add task", use_container_width=True)
 
-if not owner.pets:
-    st.info("Add at least one pet before adding tasks.")
-else:
-    pet_names = [p.name for p in owner.pets]
+        if task_submitted:
+            if not task_title.strip():
+                st.warning("Please enter a task title.")
+            else:
+                pet = owner.get_pet(target_pet)
+                pet.add_task(Task(
+                    title=task_title.strip(),
+                    duration_minutes=int(duration),
+                    priority=priority,
+                    frequency=frequency,
+                    description=description,
+                    category=category,
+                ))
+                st.success(f"Added **{task_title}** to {pet.name}.")
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        target_pet = st.selectbox("Assign to pet", pet_names)
-    with col2:
-        task_title = st.text_input("Task title", value="Morning walk")
-    with col3:
-        priority = st.selectbox("Priority", ["low", "medium", "high"], index=2)
+        st.divider()
 
-    col4, col5, col6 = st.columns(3)
-    with col4:
-        duration = st.number_input("Duration (min)", min_value=1, max_value=240, value=20)
-    with col5:
-        frequency = st.selectbox("Frequency", ["daily", "weekly", "as-needed"])
-    with col6:
-        category = st.selectbox(
-            "Category", ["general", "feeding", "walk", "grooming", "medication", "enrichment", "hygiene"]
+        # ----- Filter controls -----
+        st.subheader("All Tasks")
+        fcol1, fcol2 = st.columns(2)
+        with fcol1:
+            filter_pet = st.selectbox(
+                "Filter by pet",
+                ["All pets"] + [p.name for p in owner.pets],
+                key="filter_pet",
+            )
+        with fcol2:
+            filter_status = st.selectbox(
+                "Filter by status",
+                ["All", "Pending only", "Completed only"],
+                key="filter_status",
+            )
+
+        # Map UI selections to filter_tasks() arguments
+        scheduler = Scheduler(owner=owner)
+        pet_filter    = None if filter_pet == "All pets" else filter_pet
+        status_filter = None if filter_status == "All" else (filter_status == "Completed only")
+        filtered = scheduler.filter_tasks(completed=status_filter, pet_name=pet_filter)
+
+        if not filtered:
+            st.info("No tasks match the selected filters.")
+        else:
+            priority_badge = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+            rows = [
+                {
+                    "Pet":           pet.name,
+                    "Task":          task.title,
+                    "Pri":           priority_badge.get(task.priority, "") + " " + task.priority,
+                    "Duration (min)": task.duration_minutes,
+                    "Frequency":     task.frequency,
+                    "Category":      task.category,
+                    "Status":        "Done" if task.completed else "Pending",
+                    "Due":           str(task.due_date),
+                }
+                for pet, task in filtered
+            ]
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+            st.caption(f"Showing {len(rows)} task(s).")
+
+# -------------------------------------------------------------------
+# TAB 3 — Today's Schedule
+# -------------------------------------------------------------------
+with tab_schedule:
+    st.header("Today's Schedule")
+
+    if not owner.get_all_pending_tasks():
+        st.info("No pending tasks to schedule. Add tasks in the **Tasks** tab.")
+    else:
+        sort_order = st.radio(
+            "Display order",
+            ["By priority (high first)", "By start time (chronological)"],
+            horizontal=True,
         )
 
-    description = st.text_input("Description (optional)", value="")
+        if st.button("Generate schedule", type="primary", use_container_width=True):
+            scheduler = Scheduler(owner=owner)
+            plan = scheduler.build_schedule()
 
-    if st.button("Add task"):
-        pet = owner.get_pet(target_pet)
-        new_task = Task(
-            title=task_title,
-            duration_minutes=int(duration),
-            priority=priority,
-            frequency=frequency,
-            description=description,
-            category=category,
-        )
-        pet.add_task(new_task)          # <-- calls Pet.add_task() from pawpal_system.py
-        st.success(f"Added '{task_title}' to {pet.name}.")
+            # Optionally re-sort by time
+            display_plan = (
+                scheduler.sort_by_time(plan)
+                if sort_order == "By start time (chronological)"
+                else plan
+            )
 
-    # Show all current tasks grouped by pet
-    all_pairs = owner.get_all_tasks()
-    if all_pairs:
-        st.markdown("**All tasks:**")
-        rows = [
-            {
-                "Pet": pet.name,
-                "Task": task.title,
-                "Duration (min)": task.duration_minutes,
-                "Priority": task.priority,
-                "Frequency": task.frequency,
-                "Done": task.completed,
-            }
-            for pet, task in all_pairs
-        ]
-        st.table(rows)
-    else:
-        st.info("No tasks yet.")
+            # ---- Conflict detection ----
+            conflicts = scheduler.detect_conflicts(plan)
+            if conflicts:
+                st.error(f"**{len(conflicts)} scheduling conflict(s) detected:**")
+                for warning in conflicts:
+                    st.warning(warning)
+            else:
+                st.success("No scheduling conflicts detected.")
 
-st.divider()
+            st.divider()
 
-# ------------------------------------------------------------------
-# Section: Build Schedule
-# Calls Scheduler.build_schedule() and displays get_summary() output.
-# ------------------------------------------------------------------
-st.header("Build Today's Schedule")
+            # ---- Schedule table ----
+            total_used = sum(t.duration_minutes for _, t in plan)
+            time_pct   = int(total_used / owner.available_minutes * 100)
 
-if st.button("Generate schedule"):
-    all_pending = owner.get_all_pending_tasks()
-    if not all_pending:
-        st.warning("No pending tasks to schedule. Add tasks above.")
-    else:
-        scheduler = Scheduler(owner=owner)   # <-- Scheduler from pawpal_system.py
-        plan = scheduler.build_schedule()
-        summary = scheduler.get_summary(plan)
-        st.success("Schedule generated!")
-        st.code(summary, language=None)
+            mcol1, mcol2, mcol3 = st.columns(3)
+            mcol1.metric("Tasks scheduled", len(plan))
+            mcol2.metric("Minutes used",    f"{total_used} / {owner.available_minutes}")
+            mcol3.metric("Time utilisation", f"{time_pct}%")
 
-        # Mark scheduled tasks complete
-        if st.session_state.get("auto_mark_complete"):
-            for pet, task in plan:
-                task.mark_complete()
+            st.subheader("Scheduled tasks")
+            priority_badge = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+            sched_rows = [
+                {
+                    "Start":          task.scheduled_time,
+                    "Pet":            pet.name,
+                    "Task":           task.title,
+                    "Priority":       priority_badge.get(task.priority, "") + " " + task.priority,
+                    "Duration (min)": task.duration_minutes,
+                    "Frequency":      task.frequency,
+                    "Due":            str(task.due_date),
+                }
+                for pet, task in display_plan
+            ]
+            st.dataframe(sched_rows, use_container_width=True, hide_index=True)
+
+            # ---- Skipped tasks ----
+            plan_ids  = {id(t) for _, t in plan}
+            all_pend  = scheduler.prioritize_tasks()
+            skipped   = [(p, t) for p, t in all_pend if id(t) not in plan_ids]
+            if skipped:
+                st.divider()
+                st.subheader("Skipped tasks (not enough time)")
+                skip_rows = [
+                    {
+                        "Pet":            pet.name,
+                        "Task":           task.title,
+                        "Priority":       priority_badge.get(task.priority, "") + " " + task.priority,
+                        "Duration (min)": task.duration_minutes,
+                    }
+                    for pet, task in skipped
+                ]
+                st.dataframe(skip_rows, use_container_width=True, hide_index=True)
+                st.caption(
+                    f"{len(skipped)} task(s) skipped. "
+                    f"Increase available minutes in the sidebar to fit more."
+                )
