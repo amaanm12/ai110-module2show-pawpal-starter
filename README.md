@@ -167,6 +167,4 @@ py -m pytest tests/test_pawpal.py -v
 Core scheduling logic — priority ordering, time assignment, recurrence, and conflict detection — is fully covered by tests.
 One star is held back because edge cases (zero available minutes, task duration exceeding total budget, weekly recurrence spanning month boundaries) are not yet tested.
 
-###Image
 
-![alt text](Project 2 codepath SS.png)
